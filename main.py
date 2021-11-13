@@ -1,50 +1,78 @@
-import threading
-import time
+from multiprocessing import Process, Pipe
+from os import getpid
+from datetime import datetime
 
-def thread_a():
-    print('Thread A is starting...')
 
-    print('Thread A waiting to acquire lock A.')
-    lock_a.acquire()
-    print('Thread A has acquired lock A, performing some calculation...')
-    time.sleep(2)
+def local_time(counter):
+    return f' Lamport_time = {counter} local_time = {datetime.now()}'
 
-    print('Thread A waiting to acquire lock B.')
-    lock_b.acquire()
-    print('Thread A has acquired lock B, performing some calculation...')
-    time.sleep(2)
 
-    print('Thread A releasing both locks.')
-    lock_a.release()
-    lock_b.release()
+def calc_recv_timestamp(recv_time_stamp, counter):
+    return max(recv_time_stamp, counter) + 1
 
-def thread_b():
-    print('Thread B is starting...')
 
-    print('Thread B waiting to acquire lock B.')
-    lock_b.acquire()
-    print('Thread B has acquired lock B, performing some calculation...')
-    time.sleep(5)
+def event(pid, counter):
+    counter += 1
+    time = str(pid) + local_time(counter)
+    print(f'Something happened in {time} !')
+    return counter
 
-    print('Thread B waiting to acquire lock A.')
-    lock_a.acquire()
-    print('Thread B has acquired lock A, performing some calculation...')
-    time.sleep(5)
 
-    print('Thread B releasing both locks.')
-    lock_b.release()
-    lock_a.release()
+def send_message(pipe, pid, counter):
+    counter += 1
+    pipe.send(('Empty shell', counter))
+    print('Message sent from ' + str(pid) + local_time(counter))
+    return counter
 
-lock_a = threading.Lock()
-lock_b = threading.Lock()
 
-thread1 = threading.Thread(target=thread_a)
-thread2 = threading.Thread(target=thread_b)
+def recv_message(pipe, pid, counter):
+    message, timestamp = pipe.recv()
+    counter = calc_recv_timestamp(timestamp, counter)
+    print('Message received at ' + str(pid) + local_time(counter))
+    return counter
 
-thread1.start()
-thread2.start()
 
-thread1.join()
-thread2.join()
+def process_one(pipe12):
+    pid = getpid()
+    counter = 0
+    counter = event(pid, counter)
+    counter = send_message(pipe12, pid, counter)
+    counter = event(pid, counter)
+    counter = recv_message(pipe12, pid, counter)
+    counter = event(pid, counter)
 
-print('Finished.')
+
+def process_two(pipe21, pipe23):
+    pid = getpid()
+    counter = 0
+    counter = recv_message(pipe21, pid, counter)
+    counter = send_message(pipe21, pid, counter)
+    counter = send_message(pipe23, pid, counter)
+    counter = recv_message(pipe23, pid, counter)
+
+
+def process_three(pipe32):
+    pid = getpid()
+    counter = 0
+    counter = recv_message(pipe32, pid, counter)
+    counter = send_message(pipe32, pid, counter)
+
+
+if __name__ == '__main__':
+    oneandtwo, twoandone = Pipe()
+    twoandthree, threeandtwo = Pipe()
+
+    process1 = Process(target=process_one,
+                       args=(oneandtwo,))
+    process2 = Process(target=process_two,
+                       args=(twoandone, twoandthree))
+    process3 = Process(target=process_three,
+                       args=(threeandtwo,))
+
+    process1.start()
+    process2.start()
+    process3.start()
+
+    process1.join()
+    process2.join()
+    process3.join()
